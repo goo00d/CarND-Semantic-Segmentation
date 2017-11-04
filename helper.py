@@ -20,6 +20,15 @@ class DLProgress(tqdm):
         self.update((block_num - self.last_block) * block_size)
         self.last_block = block_num
 
+def random_darken(img):
+    """Given an image (from Image.open), randomly darken a part of it."""
+    h,w = img.shape[:2]
+
+    # Make a random box.
+    x1, y1 = random.randint(0, w), random.randint(0, h)
+    x2, y2 = random.randint(x1, w), random.randint(y1, h)
+    img[y1:y2+1,x1:x2+1] = 0.5*img[y1:y2+1,x1:x2+1]
+    return img
 
 def maybe_download_pretrained_vgg(data_dir):
     """
@@ -85,6 +94,7 @@ def gen_batch_function(data_folder, image_shape):
                 gt_image_file = label_paths[os.path.basename(image_file)]
 
                 image = scipy.misc.imresize(scipy.misc.imread(image_file), image_shape)
+                image = random_darken(image)
                 gt_image = scipy.misc.imresize(scipy.misc.imread(gt_image_file), image_shape)
 
                 gt_bg = np.all(gt_image == background_color, axis=2)
@@ -123,6 +133,50 @@ def gen_test_output(sess, logits, keep_prob, image_pl, data_folder, image_shape)
         street_im.paste(mask, box=None, mask=mask)
 
         yield os.path.basename(image_file), np.array(street_im)
+
+def mean_iou(ground_truth, prediction, num_classes):
+    # TODO: Use `tf.metrics.mean_iou` to compute the mean IoU.
+    iou, iou_op = tf.metrics.mean_iou(ground_truth, prediction, num_classes)
+    return iou, iou_op
+
+def iou_output(sess, logits,keep_prob, image_pl, data_dir, image_shape,num_classes):
+    """
+    Generate test output using the test images
+    :param sess: TF session
+    :param logits: TF Tensor for the logits
+    :param keep_prob: TF Placeholder for the dropout keep robability
+    :param image_pl: TF Placeholder for the image placeholder
+    :param data_folder: Path to the folder that contains the datasets
+    :param image_shape: Tuple - Shape of image
+    :return: Output for for each test image
+    """
+    data_folder = os.path.join(data_dir, 'data_road/training')
+    image_paths = glob(os.path.join(data_folder, 'image_2', '*.png'))
+    background_color = np.array([255, 0, 0])
+    label_paths = {
+        re.sub(r'_(lane|road)_', '_', os.path.basename(path)): path
+        for path in glob(os.path.join(data_folder, 'gt_image_2', '*_road_*.png'))}
+
+    for image_file in glob(os.path.join(data_folder, 'image_2', '*.png')):
+        image = scipy.misc.imresize(scipy.misc.imread(image_file), image_shape)
+        im_softmax = sess.run(
+            [tf.nn.softmax(logits)],
+            {keep_prob: 1.0, image_pl: [image]})
+        im_softmax = im_softmax[0][:, 1].reshape(image_shape[0], image_shape[1])
+        segmentation = (im_softmax > 0.5).reshape(image_shape[0], image_shape[1])
+
+        gt_image_file = label_paths[os.path.basename(image_file)]
+        gt_image = scipy.misc.imresize(scipy.misc.imread(gt_image_file), image_shape)
+
+        gt_bg = np.all(gt_image == background_color, axis=2)
+        gt_image = np.invert(gt_bg)
+        ground_truth = tf.constant(gt_image, dtype=tf.float32)
+        prediction = tf.constant(segmentation, dtype=tf.float32)
+        iou, iou_op = mean_iou(ground_truth, prediction, num_classes)
+        sess.run(tf.local_variables_initializer())
+        sess.run(iou_op)
+
+        print('Mean IoU = ',sess.run(iou))
 
 
 def save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image):
