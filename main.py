@@ -55,8 +55,10 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     :return: The Tensor for the last layer of output
     """
     # TODO: Implement function
-    conv_1x1 = tf.layers.conv2d(vgg_layer7_out,num_classes,1,padding='same',
-                                kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
+    reg_param = 1e-3
+    conv_1x1 = tf.layers.conv2d(vgg_layer7_out, num_classes, 1, padding='same',
+                                  kernel_regularizer=tf.contrib.layers.l2_regularizer(reg_param),
+                                  kernel_initializer=tf.truncated_normal_initializer(stddev=0.01))
     output = tf.layers.conv2d_transpose(conv_1x1,vgg_layer4_out.shape[-1],4,2,padding='same',
                                         kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
     output = tf.add(output,vgg_layer4_out)
@@ -106,7 +108,7 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
     sess.run(tf.global_variables_initializer())
     for i in range(epochs):
         for batch in get_batches_fn(batch_size):
-            _,loss = sess.run([train_op,cross_entropy_loss],feed_dict={input_image: batch[0], correct_label: batch[1], keep_prob: 0.5, learning_rate:0.001})
+            _,loss = sess.run([train_op,cross_entropy_loss],feed_dict={input_image: batch[0], correct_label: batch[1], keep_prob: 0.5, learning_rate:1e-4})
             print('epoch:',i+1,'loss=',loss)
     pass
 #tests.test_train_nn(train_nn)
@@ -174,7 +176,7 @@ def run():
             correct_labels = tf.placeholder(tf.float32, shape=[None,None,None, num_classes])
             learning_rate = tf.placeholder(tf.float32)
             logits, train_op, cross_entropy_loss = optimize(output,correct_labels,learning_rate,num_classes)
-            train_nn(sess,8,12,get_batches_fn,train_op,cross_entropy_loss,image_input,correct_labels,keep_prob,learning_rate)
+            train_nn(sess,20,6,get_batches_fn,train_op,cross_entropy_loss,image_input,correct_labels,keep_prob,learning_rate)
             output_mask = tf.nn.softmax(logits,name='output_mask')
             builder.add_meta_graph_and_variables(sess,['inference_fcn'])
             # TODO: Train NN using the train_nn function
